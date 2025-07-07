@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template
+import streamlit as st
 import os
 import time
 import PyPDF2
@@ -11,20 +11,18 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-app = Flask(__name__)
-
-DOWNLOAD_DIR = os.path.join(os.getcwd(), "downloads")
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-# Use environment variable for OpenAI API key
+# Set OpenAI key from environment variable
 openai.api_key = os.environ.get("OPENAI_API_KEY")
+
+DOWNLOAD_DIR = "downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 def analyze_guidance(code):
     url = f"https://www.nice.org.uk/guidance/{code}"
 
     chrome_options = Options()
     chrome_options.add_experimental_option("prefs", {
-        "download.default_directory": DOWNLOAD_DIR,
+        "download.default_directory": os.path.abspath(DOWNLOAD_DIR),
         "download.prompt_for_download": False,
         "plugins.always_open_pdf_externally": True
     })
@@ -36,11 +34,9 @@ def analyze_guidance(code):
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--window-size=1920,1080")
 
-    # Try both possible chromium paths
-    if os.path.exists("/usr/bin/chromium-browser"):
-        chrome_options.binary_location = "/usr/bin/chromium-browser"
-    elif os.path.exists("/usr/bin/chromium"):
-        chrome_options.binary_location = "/usr/bin/chromium"
+    chrome_binary_path = "/usr/bin/chromium-browser"
+    if os.path.exists(chrome_binary_path):
+        chrome_options.binary_location = chrome_binary_path
 
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -80,7 +76,7 @@ def analyze_guidance(code):
         reader = PyPDF2.PdfReader(f)
         text = ""
         for page in reader.pages:
-            text += page.extract_text() or ""
+            text += page.extract_text()
 
     truncated_text = text[:10000]
 
@@ -100,22 +96,23 @@ def analyze_guidance(code):
 
     return response.choices[0].message.content
 
-@app.route("/")
-def index():
-    return render_template("index.html")
 
-@app.route("/analyze", methods=["POST"])
-def analyze():
-    url_input = request.form.get("guidance")
-    code = url_input.strip().split("/")[-1]  # Extract 'ta1044' from full URL
+# Streamlit UI
 
-    try:
-        summary = analyze_guidance(code)
-    except Exception as e:
-        summary = f"Error: {str(e)}"
+st.title("NICE Guidance Summarizer")
 
-    return render_template("result.html", summary=summary, code=code)
+guidance_code = st.text_input("Enter NICE guidance code or URL (e.g., ta1044):")
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+if st.button("Analyze"):
+    if guidance_code:
+        with st.spinner("Downloading and analyzing guidance..."):
+            # Extract code if user entered full URL
+            code = guidance_code.strip().split("/")[-1]
+            try:
+                summary = analyze_guidance(code)
+                st.subheader("Summary:")
+                st.write(summary)
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+    else:
+        st.error("Please enter a guidance code or URL.")
