@@ -27,41 +27,35 @@ def fetch_pdf_from_uk(code):
             pass
     return None
 
-# --- G-BA DE PDF fetcher with fallback ---
 def fetch_pdfs_from_de(url):
     try:
-        url = url.split('#')[0]  # Strip #english or other fragments
+        url = url.split('#')[0]
         r = requests.get(url)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
 
-        # Primary: download-helper links
-        for a in soup.select("a.download-helper"):
-            href = a.get('href', '')
-            if href.endswith(".pdf"):
+        for a in soup.find_all("a", class_="download-helper"):
+            href = a.get("href", "")
+            filename = href.split("/")[-1].lower()
+
+            # Filter by file name patterns
+            if href.endswith(".pdf") and (
+                "resolution" in filename or
+                "justification" in filename or
+                "rl-xii" in filename
+            ):
                 full_url = requests.compat.urljoin(url, href)
                 pdf_links.append(full_url)
 
-        # Fallback: any <a> ending in .pdf
         if not pdf_links:
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                if href.endswith(".pdf"):
-                    full_url = requests.compat.urljoin(url, href)
-                    if full_url not in pdf_links:
-                        pdf_links.append(full_url)
-
-        if not pdf_links:
-            st.warning("No PDFs found on the page.")
-
+            st.warning("No Resolution or Justification PDFs found.")
         else:
-            st.markdown("### PDFs found:")
+            st.markdown("### Relevant PDFs found:")
             for i, link in enumerate(pdf_links, 1):
                 st.markdown(f"{i}. [Download PDF]({link})")
 
-        # Download PDFs
         pdf_files = []
         for pdf_url in pdf_links:
             resp = requests.get(pdf_url)
