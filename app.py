@@ -46,14 +46,15 @@ def summarize_pdf(pdf_file):
         "You are a healthcare policy expert. Summarise and analyse the following NICE guidance document:\n\n"
         + truncated_text
     )
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a healthcare policy expert."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.5
-    )
+    response = openai.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "system", "content": "You are a healthcare policy expert."},
+        {"role": "user", "content": prompt}
+    ],
+    temperature=0.5
+)
+
     return response.choices[0].message.content
 
 def extract_code(input_text):
