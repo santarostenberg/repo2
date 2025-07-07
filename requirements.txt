@@ -1,6 +1,4 @@
-Flask
+streamlit
 openai
-selenium
+requests
 PyPDF2
-webdriver-manager
-gunicorn
