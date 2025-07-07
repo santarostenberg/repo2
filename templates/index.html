@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NICE Guidance Summariser</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            flex-direction: column;
+        }
+        input, button {
+            margin-top: 10px;
+            padding: 10px;
+            width: 400px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h1>NICE Guidance Summariser</h1>
+    <form method="post" action="/analyze">
+        <input type="text" name="guidance" placeholder="https://www.nice.org.uk/guidance/ta1044" required>
+        <button type="submit">Summarise</button>
+    </form>
+</body>
+</html>
