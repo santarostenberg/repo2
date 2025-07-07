@@ -16,8 +16,8 @@ app = Flask(__name__)
 DOWNLOAD_DIR = os.path.join(os.getcwd(), "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# OpenAI client setup
-client = openai.OpenAI(api_key="your_openai_api_key")  # Replace with your actual key
+# Use environment variable for OpenAI API key
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 def analyze_guidance(code):
     url = f"https://www.nice.org.uk/guidance/{code}"
@@ -29,6 +29,17 @@ def analyze_guidance(code):
         "plugins.always_open_pdf_externally": True
     })
     chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-software-rasterizer")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--window-size=1920,1080")
+
+    # Specify chromium binary location (adjust if different)
+    chrome_binary_path = "/usr/bin/chromium-browser"  # or "/usr/bin/chromium"
+    if os.path.exists(chrome_binary_path):
+        chrome_options.binary_location = chrome_binary_path
 
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -77,7 +88,7 @@ def analyze_guidance(code):
         + truncated_text
     )
 
-    response = client.chat.completions.create(
+    response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[
             {"role": "system", "content": "You are a healthcare policy expert."},
@@ -103,8 +114,6 @@ def analyze():
         summary = f"Error: {str(e)}"
 
     return render_template("result.html", summary=summary, code=code)
-
-import os
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
