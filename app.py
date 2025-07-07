@@ -1,38 +1,38 @@
 import streamlit as st
 import requests
-from bs4 import BeautifulSoup
 import io
 import PyPDF2
 import openai
-import os
+import re
 
-# Set your OpenAI API key here or as environment variable OPENAI_API_KEY
-openai.api_key = os.getenv("OPENAI_API_KEY", "your_openai_api_key_here")
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+def extract_code(user_input):
+    # Extract guidance code like ta1044, msac123, etc.
+    user_input = user_input.strip().lower()
+    # If input is a URL, extract the last path segment
+    match = re.search(r'nice\.org\.uk/guidance/([a-z0-9]+)', user_input)
+    if match:
+        return match.group(1)
+    else:
+        return user_input  # assume direct code
 
 def get_pdf_text(code):
-    base_url = f"https://www.nice.org.uk/guidance/{code}"
-    resp = requests.get(base_url)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, 'html.parser')
-    pdf_link = soup.find('a', string="Download guidance (PDF)")
-    if not pdf_link:
-        raise Exception("Could not find PDF download link for this code.")
-    pdf_url = pdf_link['href']
-    if not pdf_url.startswith("http"):
-        pdf_url = "https://www.nice.org.uk" + pdf_url
-    pdf_resp = requests.get(pdf_url)
-    pdf_resp.raise_for_status()
-    pdf_file = io.BytesIO(pdf_resp.content)
+    pdf_url = f"https://www.nice.org.uk/guidance/{code}/download-pdf"
+    resp = requests.get(pdf_url)
+    if resp.status_code != 200:
+        raise ValueError(f"Could not fetch PDF for code '{code}'. Status: {resp.status_code}")
+    pdf_file = io.BytesIO(resp.content)
     reader = PyPDF2.PdfReader(pdf_file)
     text = ""
     for page in reader.pages:
-        text += page.extract_text()
-    return text[:10000]
+        page_text = page.extract_text()
+        if page_text:
+            text += page_text
+    return text[:10000]  # limit to first 10k chars
 
 def summarize_text(text):
-    prompt = (
-        "You are a healthcare policy expert. Summarize the following NICE guidance document:\n\n" + text
-    )
+    prompt = f"You are a healthcare policy expert. Summarise and analyse the following NICE guidance document:\n\n{text}"
     response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[
@@ -45,17 +45,17 @@ def summarize_text(text):
 
 def main():
     st.title("NICE Guidance Summarizer")
-    code = st.text_input("Enter NICE guidance code (e.g., ta1044):")
+    user_input = st.text_input("Enter NICE guidance code or full URL", "")
     if st.button("Summarize"):
-        if not code:
-            st.error("Please enter a NICE guidance code.")
+        if not user_input.strip():
+            st.error("Please enter a guidance code or URL.")
             return
         try:
-            with st.spinner("Downloading and reading PDF..."):
-                pdf_text = get_pdf_text(code.strip())
-            with st.spinner("Generating summary..."):
-                summary = summarize_text(pdf_text)
-            st.subheader(f"Summary of guidance {code.upper()}:")
+            code = extract_code(user_input)
+            st.info(f"Processing guidance code: **{code}**")
+            pdf_text = get_pdf_text(code)
+            summary = summarize_text(pdf_text)
+            st.subheader("Summary:")
             st.write(summary)
         except Exception as e:
             st.error(f"Error: {e}")
