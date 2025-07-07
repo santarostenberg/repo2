@@ -1,0 +1,6 @@
+Flask
+openai
+selenium
+PyPDF2
+webdriver-manager
+gunicorn
