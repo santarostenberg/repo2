@@ -3,36 +3,38 @@ import requests
 import io
 import PyPDF2
 import openai
-import re
 
+# Set your OpenAI API key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-def extract_code(user_input):
-    # Extract guidance code like ta1044, msac123, etc.
-    user_input = user_input.strip().lower()
-    # If input is a URL, extract the last path segment
-    match = re.search(r'nice\.org\.uk/guidance/([a-z0-9]+)', user_input)
-    if match:
-        return match.group(1)
-    else:
-        return user_input  # assume direct code
+def fetch_pdf(code):
+    # List of possible PDF URL patterns to try
+    urls = [
+        f"https://www.nice.org.uk/guidance/{code}/download-pdf",
+        f"https://www.nice.org.uk/guidance/{code}/pdf",
+        f"https://www.nice.org.uk/guidance/{code}/resources/{code}-pdf",
+        # Add other URL patterns you find from inspecting the page
+    ]
+    for url in urls:
+        try:
+            r = requests.get(url)
+            if r.status_code == 200 and 'application/pdf' in r.headers.get('Content-Type', ''):
+                return io.BytesIO(r.content)
+        except Exception:
+            pass
+    return None
 
-def get_pdf_text(code):
-    pdf_url = f"https://www.nice.org.uk/guidance/{code}/download-pdf"
-    resp = requests.get(pdf_url)
-    if resp.status_code != 200:
-        raise ValueError(f"Could not fetch PDF for code '{code}'. Status: {resp.status_code}")
-    pdf_file = io.BytesIO(resp.content)
+def summarize_pdf(pdf_file):
     reader = PyPDF2.PdfReader(pdf_file)
     text = ""
     for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text += page_text
-    return text[:10000]  # limit to first 10k chars
+        text += page.extract_text() or ""
+    truncated_text = text[:10000]
 
-def summarize_text(text):
-    prompt = f"You are a healthcare policy expert. Summarise and analyse the following NICE guidance document:\n\n{text}"
+    prompt = (
+        "You are a healthcare policy expert. Summarise and analyse the following NICE guidance document:\n\n"
+        + truncated_text
+    )
     response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[
@@ -43,22 +45,29 @@ def summarize_text(text):
     )
     return response.choices[0].message.content
 
-def main():
-    st.title("NICE Guidance Summarizer")
-    user_input = st.text_input("Enter NICE guidance code or full URL", "")
-    if st.button("Summarize"):
-        if not user_input.strip():
-            st.error("Please enter a guidance code or URL.")
-            return
-        try:
-            code = extract_code(user_input)
-            st.info(f"Processing guidance code: **{code}**")
-            pdf_text = get_pdf_text(code)
-            summary = summarize_text(pdf_text)
-            st.subheader("Summary:")
-            st.write(summary)
-        except Exception as e:
-            st.error(f"Error: {e}")
+def extract_code(input_text):
+    input_text = input_text.strip().lower()
+    # If input looks like a URL, extract the last path segment as code
+    if input_text.startswith("http"):
+        return input_text.rstrip("/").split("/")[-1]
+    return input_text
 
-if __name__ == "__main__":
-    main()
+st.title("NICE Guidance Summarizer")
+
+user_input = st.text_input("Enter NICE guidance code or full URL")
+
+if st.button("Analyze"):
+    if not user_input:
+        st.error("Please enter a guidance code or URL.")
+    else:
+        code = extract_code(user_input)
+        st.write(f"Processing guidance code: {code}")
+
+        pdf_file = fetch_pdf(code)
+        if pdf_file:
+            summary = summarize_pdf(pdf_file)
+            st.subheader("Summary Result")
+            st.write(summary)
+        else:
+            st.error(f"Could not fetch PDF for code '{code}'. Tried multiple URL patterns.")
+
