@@ -9,9 +9,10 @@ from urllib.parse import urlparse
 # Initialize OpenAI client
 client = openai.OpenAI()
 
-# Set your API key via Streamlit secrets or environment variable
-openai.api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+# Set your API key via Streamlit secrets or env variable
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
+# --- NICE UK PDF fetcher ---
 def fetch_pdf_from_uk(code):
     urls = [
         f"https://www.nice.org.uk/guidance/{code}/download-pdf",
@@ -26,42 +27,69 @@ def fetch_pdf_from_uk(code):
             pass
     return None
 
+# --- G-BA DE PDF fetcher with fallback ---
 def fetch_pdfs_from_de(url):
-    """For German site, scrape the page and fetch 'Resolution' and 'Justification' PDFs"""
     try:
+        url = url.split('#')[0]  # Strip #english or other fragments
         r = requests.get(url)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
+
+        # Primary: download-helper links
         for a in soup.select("a.download-helper"):
             href = a.get('href', '')
             if href.endswith(".pdf"):
                 full_url = requests.compat.urljoin(url, href)
                 pdf_links.append(full_url)
 
-        # Download PDFs and return list of BytesIO
+        # Fallback: any <a> ending in .pdf
+        if not pdf_links:
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if href.endswith(".pdf"):
+                    full_url = requests.compat.urljoin(url, href)
+                    if full_url not in pdf_links:
+                        pdf_links.append(full_url)
+
+        if not pdf_links:
+            st.warning("No PDFs found on the page.")
+
+        else:
+            st.markdown("### PDFs found:")
+            for i, link in enumerate(pdf_links, 1):
+                st.markdown(f"{i}. [Download PDF]({link})")
+
+        # Download PDFs
         pdf_files = []
         for pdf_url in pdf_links:
             resp = requests.get(pdf_url)
             if resp.status_code == 200:
                 pdf_files.append(io.BytesIO(resp.content))
+
         return pdf_files
     except Exception as e:
         st.error(f"Error fetching German PDFs: {str(e)}")
         return []
 
+# --- PDF text extractor ---
 def extract_text_from_pdfs(pdf_files):
     full_text = ""
+    success_count = 0
     for pdf_file in pdf_files:
         try:
             reader = PyPDF2.PdfReader(pdf_file)
             for page in reader.pages:
                 full_text += page.extract_text() or ""
-        except:
+            success_count += 1
+        except Exception as e:
+            st.warning(f"Failed to parse a PDF: {e}")
             continue
-    return full_text[:10000]  # Truncate to first 10,000 chars
+    st.info(f"Parsed {success_count}/{len(pdf_files)} PDFs successfully.")
+    return full_text[:10_000]  # Truncate
 
+# --- GPT-4 summarizer ---
 def summarize_text(text):
     prompt = (
         "You are a healthcare policy expert. Summarise and analyse the following guidance document:\n\n"
@@ -77,13 +105,12 @@ def summarize_text(text):
     )
     return response.choices[0].message.content
 
+# --- Input handler ---
 def extract_code_or_url(input_text):
     input_text = input_text.strip().lower()
-    if input_text.startswith("http"):
-        return input_text
-    else:
-        return input_text
+    return input_text
 
+# --- Streamlit UI ---
 def main():
     st.title("NICE/G-BA Guidance Summarizer")
 
@@ -101,9 +128,8 @@ def main():
             domain = parsed.netloc.lower()
 
             if "nice.org.uk" in domain:
-                # UK site: extract last part as code
                 code = parsed.path.strip("/").split("/")[-1]
-                st.write(f"Detected UK NICE code: {code}")
+                st.write(f"Detected UK NICE code: `{code}`")
                 pdf_file = fetch_pdf_from_uk(code)
                 if not pdf_file:
                     st.error(f"Could not fetch PDF for code '{code}' from NICE UK.")
@@ -111,7 +137,6 @@ def main():
                 text = extract_text_from_pdfs([pdf_file])
 
             elif "g-ba.de" in domain:
-                # German site
                 st.write("Detected German G-BA site")
                 pdf_files = fetch_pdfs_from_de(input_value)
                 if not pdf_files:
@@ -120,12 +145,13 @@ def main():
                 text = extract_text_from_pdfs(pdf_files)
 
             else:
-                st.error("Unsupported URL domain. Please enter a UK NICE code or URL, or a German G-BA URL.")
+                st.error("Unsupported domain. Please use NICE or G-BA URLs.")
                 return
+
         else:
-            # Assume UK code
+            # Assume NICE code
             code = input_value
-            st.write(f"Assuming UK NICE code: {code}")
+            st.write(f"Assuming UK NICE code: `{code}`")
             pdf_file = fetch_pdf_from_uk(code)
             if not pdf_file:
                 st.error(f"Could not fetch PDF for code '{code}' from NICE UK.")
@@ -133,11 +159,12 @@ def main():
             text = extract_text_from_pdfs([pdf_file])
 
         if not text.strip():
-            st.error("Failed to extract text from PDF(s).")
+            st.error("Failed to extract any text from the document.")
             return
 
-        st.info("Summarizing the guidance document...")
-        summary = summarize_text(text)
+        with st.spinner("Summarizing the guidance document..."):
+            summary = summarize_text(text)
+
         st.subheader("Summary Result")
         st.write(summary)
 
