@@ -36,10 +36,11 @@ def analyze_guidance(code):
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--window-size=1920,1080")
 
-    # Specify chromium binary location (adjust if different)
-    chrome_binary_path = "/usr/bin/chromium-browser"  # or "/usr/bin/chromium"
-    if os.path.exists(chrome_binary_path):
-        chrome_options.binary_location = chrome_binary_path
+    # Try both possible chromium paths
+    if os.path.exists("/usr/bin/chromium-browser"):
+        chrome_options.binary_location = "/usr/bin/chromium-browser"
+    elif os.path.exists("/usr/bin/chromium"):
+        chrome_options.binary_location = "/usr/bin/chromium"
 
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -79,7 +80,7 @@ def analyze_guidance(code):
         reader = PyPDF2.PdfReader(f)
         text = ""
         for page in reader.pages:
-            text += page.extract_text()
+            text += page.extract_text() or ""
 
     truncated_text = text[:10000]
 
@@ -106,7 +107,7 @@ def index():
 @app.route("/analyze", methods=["POST"])
 def analyze():
     url_input = request.form.get("guidance")
-    code = url_input.strip().split("/")[-1]  # Extracts 'ta1044' from full URL
+    code = url_input.strip().split("/")[-1]  # Extract 'ta1044' from full URL
 
     try:
         summary = analyze_guidance(code)
