@@ -64,6 +64,40 @@ def fetch_pdfs_from_gba(url):
         st.error(f"Error fetching G-BA PDFs: {e}")
         return []
 
+# --- HAS France PDF fetcher ---
+def fetch_pdfs_from_has(url):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        pdf_links = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.endswith(".pdf") and "upload" in href:
+                full_url = href if href.startswith("http") else urljoin("https://www.has-sante.fr", href)
+                pdf_links.append(full_url)
+
+        if not pdf_links:
+            st.warning("No HAS PDFs found.")
+            return []
+
+        st.markdown("### HAS PDFs found:")
+        for i, link in enumerate(pdf_links, 1):
+            st.markdown(f"{i}. [Download PDF]({link})")
+
+        pdf_files = []
+        for pdf_url in pdf_links:
+            r = requests.get(pdf_url, headers=headers)
+            if r.status_code == 200:
+                pdf_files.append(io.BytesIO(r.content))
+
+        return pdf_files
+    except Exception as e:
+        st.error(f"Error fetching HAS PDFs: {e}")
+        return []
+
 # --- Extract text from PDF(s) ---
 def extract_text_from_pdfs(pdf_files):
     full_text = ""
@@ -90,9 +124,9 @@ def summarize_text(text, source_label="guidance"):
     return response.choices[0].message.content
 
 # --- Streamlit app ---
-st.title("NICE & G-BA Healthcare Guidance Summarizer")
+st.title("NICE, G-BA & HAS Healthcare Guidance Summarizer")
 
-user_input = st.text_input("Enter NICE code, or full G-BA/NICE URL")
+user_input = st.text_input("Enter NICE code, or full NICE / G-BA / HAS URL")
 
 if st.button("Analyze"):
     if not user_input:
@@ -119,8 +153,17 @@ if st.button("Analyze"):
                     st.error("Could not fetch PDF.")
                 else:
                     text = extract_text_from_pdfs([pdf_file])
+
+            elif "has-sante.fr" in domain:
+                st.write("Detected HAS (France) guidance link.")
+                pdf_files = fetch_pdfs_from_has(input_val)
+                if not pdf_files:
+                    st.error("No valid PDFs found.")
+                else:
+                    text = extract_text_from_pdfs(pdf_files)
+
             else:
-                st.error("Unsupported domain. Only NICE and G-BA are supported.")
+                st.error("Unsupported domain. Only NICE, G-BA, and HAS are supported.")
         else:
             code = input_val
             st.write(f"Assuming NICE code: `{code}`")
