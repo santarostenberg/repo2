@@ -66,37 +66,23 @@ def fetch_pdfs_from_gba(url):
 
 # --- HAS France PDF fetcher ---
 def fetch_pdfs_from_has(url):
+    import requests
+    import io
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
+    import streamlit as st
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    valid_pdfs = []
+    skipped_links = []
+
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers)
+        resp = requests.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        pdf_links = []
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if href.endswith(".pdf") and "upload" in href:
-                full_url = href if href.startswith("http") else urljoin("https://www.has-sante.fr", href)
-                pdf_links.append(full_url)
+        all_links = soup.find_all("a", href=True)
 
-        if not pdf_links:
-            st.warning("No HAS PDFs found.")
-            return []
-
-        st.markdown("### HAS PDFs found:")
-        for i, link in enumerate(pdf_links, 1):
-            st.markdown(f"{i}. [Download PDF]({link})")
-
-        pdf_files = []
-        for pdf_url in pdf_links:
-            r = requests.get(pdf_url, headers=headers)
-            if r.status_code == 200:
-                pdf_files.append(io.BytesIO(r.content))
-
-        return pdf_files
-    except Exception as e:
-        st.error(f"Error fetching HAS PDFs: {e}")
-        return []
 
 # --- Extract text from PDF(s) ---
 def extract_text_from_pdfs(pdf_files):
