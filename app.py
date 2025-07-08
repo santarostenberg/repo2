@@ -64,23 +64,24 @@ def fetch_pdfs_from_de(url):
 
 # --- HAS France PDF fetcher ---
 def fetch_pdfs_from_fr(url):
-    try:
-        from urllib.parse import urljoin
-        import time
+    from urllib.parse import urljoin
+    import time
 
+    try:
         url = url.split("#")[0]
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
         }
 
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers=headers, timeout=15)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
         for a in soup.find_all("a", href=True):
-            if a["href"].endswith(".pdf"):
-                full_url = urljoin(url, a["href"])
+            href = a["href"]
+            if href.endswith(".pdf"):
+                full_url = urljoin(url, href)
                 pdf_links.append(full_url)
 
         if not pdf_links:
@@ -94,19 +95,20 @@ def fetch_pdfs_from_fr(url):
         pdf_files = []
         for pdf_url in pdf_links:
             try:
-                resp = requests.get(pdf_url, headers=headers, timeout=15)
-                if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/pdf"):
-                    pdf_files.append(io.BytesIO(resp.content))
+                response = requests.get(pdf_url, headers=headers, timeout=20)
+                if response.status_code == 200 and response.headers.get("Content-Type", "").startswith("application/pdf"):
+                    pdf_files.append(io.BytesIO(response.content))
                 else:
-                    st.warning(f"Failed to fetch: {pdf_url} (status {resp.status_code})")
+                    st.warning(f"Could not fetch: {pdf_url} (status {response.status_code})")
             except Exception as e:
-                st.warning(f"Download failed: {pdf_url}\nReason: {e}")
-                time.sleep(1)  # be nice to HAS servers
+                st.warning(f"Failed to download: {pdf_url}\nReason: {e}")
+                time.sleep(1)
 
         return pdf_files
     except Exception as e:
-        st.error(f"General error fetching from HAS: {str(e)}")
+        st.error(f"Error fetching PDFs from HAS: {e}")
         return []
+
 
 
 
