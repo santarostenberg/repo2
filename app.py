@@ -27,6 +27,7 @@ def fetch_pdf_from_uk(code):
             pass
     return None
 
+# --- G-BA DE PDF fetcher ---
 def fetch_pdfs_from_de(url):
     try:
         url = url.split('#')[0]
@@ -40,7 +41,6 @@ def fetch_pdfs_from_de(url):
             href = a.get("href", "")
             filename = href.split("/")[-1].lower()
 
-            # Filter by file name patterns
             if href.endswith(".pdf") and (
                 "resolution" in filename or
                 "justification" in filename or
@@ -66,6 +66,7 @@ def fetch_pdfs_from_de(url):
     except Exception as e:
         st.error(f"Error fetching German PDFs: {str(e)}")
         return []
+
 # --- HAS FR PDF fetcher ---
 def fetch_pdfs_from_fr(url):
     try:
@@ -83,7 +84,8 @@ def fetch_pdfs_from_fr(url):
             if ul:
                 for a in ul.find_all("a", href=True):
                     href = a["href"]
-                    if href.endswith(".pdf"):
+                    # Only include direct PDF links, not viewer proxies like core.xvox.fr
+                    if href.endswith(".pdf") and "core.xvox.fr" not in href:
                         full_url = requests.compat.urljoin(url, href)
                         pdf_links.append(full_url)
 
@@ -146,7 +148,7 @@ def extract_code_or_url(input_text):
 def main():
     st.title("NICE / G-BA / HAS Guidance Summarizer")
 
-    user_input = st.text_input("Enter NICE guidance code, or full UK/German guidance URL:")
+    user_input = st.text_input("Enter NICE guidance code, or full UK/German/French guidance URL:")
 
     if st.button("Analyze"):
         if not user_input:
@@ -184,9 +186,8 @@ def main():
                     return
                 text = extract_text_from_pdfs(pdf_files)
 
-
             else:
-                st.error("Unsupported domain. Please use NICE or G-BA URLs.")
+                st.error("Unsupported domain. Please use NICE, G-BA, or HAS URLs.")
                 return
 
         else:
