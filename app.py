@@ -4,10 +4,12 @@ import io
 import PyPDF2
 import openai
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 
 # Initialize OpenAI client
 client = openai.OpenAI()
+
+# Set your API key via Streamlit secrets or env variable
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- NICE UK PDF fetcher ---
@@ -25,30 +27,41 @@ def fetch_pdf_from_uk(code):
             pass
     return None
 
-# --- G-BA German PDF fetcher ---
+# --- G-BA DE PDF fetcher with fallback ---
 def fetch_pdfs_from_de(url):
     try:
-        url = url.split('#')[0]
+        url = url.split('#')[0]  # Strip #english or other fragments
         r = requests.get(url)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
-        for a in soup.find_all("a", class_="download-helper"):
-            href = a.get("href", "")
-            filename = href.split("/")[-1].lower()
-            if href.endswith(".pdf") and (
-                "resolution" in filename or "justification" in filename or "rl-xii" in filename
-            ):
+
+        # Primary: download-helper links
+        for a in soup.select("a.download-helper"):
+            href = a.get('href', '')
+            if href.endswith(".pdf"):
                 full_url = requests.compat.urljoin(url, href)
                 pdf_links.append(full_url)
 
+        # Fallback: any <a> ending in .pdf
         if not pdf_links:
-            st.warning("No relevant German PDFs found.")
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if href.endswith(".pdf"):
+                    full_url = requests.compat.urljoin(url, href)
+                    if full_url not in pdf_links:
+                        pdf_links.append(full_url)
+
+        if not pdf_links:
+            st.warning("No PDFs found on the page.")
+
         else:
+            st.markdown("### PDFs found:")
             for i, link in enumerate(pdf_links, 1):
                 st.markdown(f"{i}. [Download PDF]({link})")
 
+        # Download PDFs
         pdf_files = []
         for pdf_url in pdf_links:
             resp = requests.get(pdf_url)
@@ -58,50 +71,6 @@ def fetch_pdfs_from_de(url):
         return pdf_files
     except Exception as e:
         st.error(f"Error fetching German PDFs: {str(e)}")
-        return []
-
-# --- HAS France PDF fetcher (robust) ---
-def fetch_pdfs_from_fr(url):
-    try:
-        url = url.split("#")[0]
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:115.0) Gecko/20100101 Firefox/115.0",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Referer": url,
-            "Connection": "keep-alive"
-        }
-
-        r = requests.get(url, headers=headers, timeout=20)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        pdf_links = []
-        for link in soup.select("a[href$='.pdf']"):
-            full_url = urljoin(url, link['href'])
-            pdf_links.append(full_url)
-
-        if not pdf_links:
-            st.warning("No PDFs found on the HAS page.")
-            return []
-
-        st.markdown("### PDFs found on the HAS page:")
-        for i, link in enumerate(pdf_links, 1):
-            st.markdown(f"{i}. [Download PDF]({link})")
-
-        pdf_files = []
-        for pdf_url in pdf_links:
-            try:
-                res = requests.get(pdf_url, headers=headers, timeout=20)
-                if res.status_code == 200 and res.headers.get("Content-Type", "").startswith("application/pdf"):
-                    pdf_files.append(io.BytesIO(res.content))
-                else:
-                    st.warning(f"Could not fetch: {pdf_url} (status {res.status_code})")
-            except Exception as e:
-                st.warning(f"Failed to download: {pdf_url}\nReason: {e}")
-
-        return pdf_files
-    except Exception as e:
-        st.error(f"Error fetching PDFs from HAS: {e}")
         return []
 
 # --- PDF text extractor ---
@@ -116,14 +85,14 @@ def extract_text_from_pdfs(pdf_files):
             success_count += 1
         except Exception as e:
             st.warning(f"Failed to parse a PDF: {e}")
-    st.info(f"Parsed {success_count}/{len(pdf_files)} PDFs.")
+            continue
+    st.info(f"Parsed {success_count}/{len(pdf_files)} PDFs successfully.")
     return full_text[:10_000]  # Truncate
 
 # --- GPT-4 summarizer ---
 def summarize_text(text):
     prompt = (
-        "You are a healthcare policy expert. The following documents are from a government healthcare site. "
-        "If any English summary is included, focus on that. Otherwise, attempt to summarise key content in English:\n\n"
+        "You are a healthcare policy expert. Summarise and analyse the following guidance document:\n\n"
         + text
     )
     response = client.chat.completions.create(
@@ -138,16 +107,14 @@ def summarize_text(text):
 
 # --- Input handler ---
 def extract_code_or_url(input_text):
-    return input_text.strip().lower()
+    input_text = input_text.strip().lower()
+    return input_text
 
 # --- Streamlit UI ---
 def main():
-    st.title("NICE / G-BA / HAS Guidance Summarizer")
+    st.title("NICE/G-BA Guidance Summarizer")
 
-    user_input = st.text_input("Enter NICE guidance code, or full UK/German/French guidance URL:")
-
-    pdf_files = []
-    extracted_text = ""
+    user_input = st.text_input("Enter NICE guidance code, or full UK/German guidance URL:")
 
     if st.button("Analyze"):
         if not user_input:
@@ -165,50 +132,39 @@ def main():
                 st.write(f"Detected UK NICE code: `{code}`")
                 pdf_file = fetch_pdf_from_uk(code)
                 if not pdf_file:
-                    st.error("Could not fetch PDF from NICE UK.")
+                    st.error(f"Could not fetch PDF for code '{code}' from NICE UK.")
                     return
-                pdf_files = [pdf_file]
+                text = extract_text_from_pdfs([pdf_file])
 
             elif "g-ba.de" in domain:
                 st.write("Detected German G-BA site")
                 pdf_files = fetch_pdfs_from_de(input_value)
                 if not pdf_files:
-                    st.error("Could not fetch PDFs from G-BA.")
+                    st.error("Could not fetch PDFs from German site.")
                     return
-
-            elif "has-sante.fr" in domain:
-                st.write("Detected French HAS site")
-                pdf_files = fetch_pdfs_from_fr(input_value)
-                if not pdf_files:
-                    st.error("Could not fetch PDFs from HAS.")
-                    return
+                text = extract_text_from_pdfs(pdf_files)
 
             else:
-                st.error("Unsupported domain. Please use NICE, G-BA or HAS links.")
+                st.error("Unsupported domain. Please use NICE or G-BA URLs.")
                 return
 
-            extracted_text = extract_text_from_pdfs(pdf_files)
-
         else:
+            # Assume NICE code
             code = input_value
             st.write(f"Assuming UK NICE code: `{code}`")
             pdf_file = fetch_pdf_from_uk(code)
             if not pdf_file:
                 st.error(f"Could not fetch PDF for code '{code}' from NICE UK.")
                 return
-            extracted_text = extract_text_from_pdfs([pdf_file])
+            text = extract_text_from_pdfs([pdf_file])
 
-    # Manual fallback for PDF upload
-    st.markdown("---")
-    st.subheader("Or upload a PDF manually")
-    uploaded_file = st.file_uploader("Upload a PDF file here")
-    if uploaded_file:
-        pdf_files = [uploaded_file]
-        extracted_text = extract_text_from_pdfs(pdf_files)
+        if not text.strip():
+            st.error("Failed to extract any text from the document.")
+            return
 
-    if extracted_text:
-        with st.spinner("Summarizing with GPT-4..."):
-            summary = summarize_text(extracted_text)
+        with st.spinner("Summarizing the guidance document..."):
+            summary = summarize_text(text)
+
         st.subheader("Summary Result")
         st.write(summary)
 
