@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 # Initialize OpenAI client
 client = openai.OpenAI()
 
-# Set your API key via Streamlit secrets or env variable
+# Set API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- NICE UK PDF fetcher ---
@@ -27,7 +27,7 @@ def fetch_pdf_from_uk(code):
             pass
     return None
 
-# --- G-BA DE PDF fetcher ---
+# --- German G-BA PDF fetcher ---
 def fetch_pdfs_from_de(url):
     try:
         url = url.split('#')[0]
@@ -67,7 +67,7 @@ def fetch_pdfs_from_de(url):
         st.error(f"Error fetching German PDFs: {str(e)}")
         return []
 
-# --- HAS FR PDF fetcher ---
+# --- HAS France PDF fetcher ---
 def fetch_pdfs_from_fr(url):
     try:
         url = url.split("#")[0]
@@ -77,29 +77,16 @@ def fetch_pdfs_from_fr(url):
 
         pdf_links = []
 
-        # First try: structured section
+        # Find "Version Anglaise"
         english_section = soup.find("h3", string=lambda s: s and "Version Anglaise" in s)
         if english_section:
             ul = english_section.find_next("ul")
             if ul:
                 for a in ul.find_all("a", href=True):
                     href = a["href"]
-                    if href.endswith(".pdf") and "core.xvox.fr" not in href:
+                    if href.endswith(".pdf") and not href.startswith("https://core.xvox.fr"):
                         full_url = requests.compat.urljoin(url, href)
                         pdf_links.append(full_url)
-
-        # Fallback: scan all <a> tags for relevant .pdfs
-        if not pdf_links:
-            for a in soup.find_all("a", href=True):
-                text = a.get_text(strip=True).lower()
-                href = a["href"]
-                if (
-                    href.endswith(".pdf") and
-                    "core.xvox.fr" not in href and
-                    ("summary" in href.lower() or "version anglaise" in text or "english" in text)
-                ):
-                    full_url = requests.compat.urljoin(url, href)
-                    pdf_links.append(full_url)
 
         if not pdf_links:
             st.warning("No English summary PDF found on the HAS page.")
@@ -119,8 +106,7 @@ def fetch_pdfs_from_fr(url):
         st.error(f"Error fetching French HAS PDF: {str(e)}")
         return []
 
-
-# --- PDF text extractor ---
+# --- PDF extractor ---
 def extract_text_from_pdfs(pdf_files):
     full_text = ""
     success_count = 0
@@ -134,9 +120,9 @@ def extract_text_from_pdfs(pdf_files):
             st.warning(f"Failed to parse a PDF: {e}")
             continue
     st.info(f"Parsed {success_count}/{len(pdf_files)} PDFs successfully.")
-    return full_text[:10_000]  # Truncate
+    return full_text[:10_000]
 
-# --- GPT-4 summarizer ---
+# --- GPT-4 Summariser ---
 def summarize_text(text):
     prompt = (
         "You are a healthcare policy expert. Summarise and analyse the following guidance document:\n\n"
@@ -152,11 +138,6 @@ def summarize_text(text):
     )
     return response.choices[0].message.content
 
-# --- Input handler ---
-def extract_code_or_url(input_text):
-    input_text = input_text.strip().lower()
-    return input_text
-
 # --- Streamlit UI ---
 def main():
     st.title("NICE / G-BA / HAS Guidance Summarizer")
@@ -168,10 +149,10 @@ def main():
             st.error("Please enter a guidance code or URL.")
             return
 
-        input_value = extract_code_or_url(user_input)
+        input_value = user_input.strip()
+        parsed = urlparse(input_value)
 
         if input_value.startswith("http"):
-            parsed = urlparse(input_value)
             domain = parsed.netloc.lower()
 
             if "nice.org.uk" in domain:
@@ -205,7 +186,7 @@ def main():
 
         else:
             # Assume NICE code
-            code = input_value
+            code = input_value.lower()
             st.write(f"Assuming UK NICE code: `{code}`")
             pdf_file = fetch_pdf_from_uk(code)
             if not pdf_file:
