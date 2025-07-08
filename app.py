@@ -4,12 +4,10 @@ import io
 import PyPDF2
 import openai
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 # Initialize OpenAI client
 client = openai.OpenAI()
-
-# Set your API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- NICE UK PDF fetcher ---
@@ -62,11 +60,8 @@ def fetch_pdfs_from_de(url):
         st.error(f"Error fetching German PDFs: {str(e)}")
         return []
 
-# --- HAS France PDF fetcher ---
+# --- HAS France PDF fetcher (improved direct-only method) ---
 def fetch_pdfs_from_fr(url):
-    from urllib.parse import urljoin
-    import time
-
     try:
         url = url.split("#")[0]
         headers = {
@@ -102,14 +97,11 @@ def fetch_pdfs_from_fr(url):
                     st.warning(f"Could not fetch: {pdf_url} (status {response.status_code})")
             except Exception as e:
                 st.warning(f"Failed to download: {pdf_url}\nReason: {e}")
-                time.sleep(1)
 
         return pdf_files
     except Exception as e:
         st.error(f"Error fetching PDFs from HAS: {e}")
         return []
-
-
 
 # --- PDF text extractor ---
 def extract_text_from_pdfs(pdf_files):
@@ -194,6 +186,7 @@ def main():
                 return
 
         else:
+            # Assume NICE code
             code = input_value
             st.write(f"Assuming UK NICE code: `{code}`")
             pdf_file = fetch_pdf_from_uk(code)
