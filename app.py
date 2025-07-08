@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 # Initialize OpenAI client
 client = openai.OpenAI()
 
-# Set API key
+# Set your API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- NICE UK PDF fetcher ---
@@ -27,7 +27,7 @@ def fetch_pdf_from_uk(code):
             pass
     return None
 
-# --- German G-BA PDF fetcher ---
+# --- G-BA German PDF fetcher ---
 def fetch_pdfs_from_de(url):
     try:
         url = url.split('#')[0]
@@ -36,23 +36,18 @@ def fetch_pdfs_from_de(url):
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
-
         for a in soup.find_all("a", class_="download-helper"):
             href = a.get("href", "")
             filename = href.split("/")[-1].lower()
-
             if href.endswith(".pdf") and (
-                "resolution" in filename or
-                "justification" in filename or
-                "rl-xii" in filename
+                "resolution" in filename or "justification" in filename or "rl-xii" in filename
             ):
                 full_url = requests.compat.urljoin(url, href)
                 pdf_links.append(full_url)
 
         if not pdf_links:
-            st.warning("No Resolution or Justification PDFs found.")
+            st.warning("No relevant German PDFs found.")
         else:
-            st.markdown("### Relevant PDFs found:")
             for i, link in enumerate(pdf_links, 1):
                 st.markdown(f"{i}. [Download PDF]({link})")
 
@@ -67,7 +62,7 @@ def fetch_pdfs_from_de(url):
         st.error(f"Error fetching German PDFs: {str(e)}")
         return []
 
-# --- HAS France PDF fetcher ---
+# --- HAS France PDF fetcher (grabs all) ---
 def fetch_pdfs_from_fr(url):
     try:
         url = url.split("#")[0]
@@ -76,22 +71,15 @@ def fetch_pdfs_from_fr(url):
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
-
-        # Find "Version Anglaise"
-        english_section = soup.find("h3", string=lambda s: s and "Version Anglaise" in s)
-        if english_section:
-            ul = english_section.find_next("ul")
-            if ul:
-                for a in ul.find_all("a", href=True):
-                    href = a["href"]
-                    if href.endswith(".pdf") and not href.startswith("https://core.xvox.fr"):
-                        full_url = requests.compat.urljoin(url, href)
-                        pdf_links.append(full_url)
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.endswith(".pdf"):
+                full_url = requests.compat.urljoin(url, href)
+                pdf_links.append(full_url)
 
         if not pdf_links:
-            st.warning("No English summary PDF found on the HAS page.")
+            st.warning("No PDFs found on the HAS page.")
         else:
-            st.markdown("### French HAS PDF found:")
             for i, link in enumerate(pdf_links, 1):
                 st.markdown(f"{i}. [Download PDF]({link})")
 
@@ -103,10 +91,10 @@ def fetch_pdfs_from_fr(url):
 
         return pdf_files
     except Exception as e:
-        st.error(f"Error fetching French HAS PDF: {str(e)}")
+        st.error(f"Error fetching PDFs from HAS: {str(e)}")
         return []
 
-# --- PDF extractor ---
+# --- PDF text extractor ---
 def extract_text_from_pdfs(pdf_files):
     full_text = ""
     success_count = 0
@@ -118,14 +106,14 @@ def extract_text_from_pdfs(pdf_files):
             success_count += 1
         except Exception as e:
             st.warning(f"Failed to parse a PDF: {e}")
-            continue
-    st.info(f"Parsed {success_count}/{len(pdf_files)} PDFs successfully.")
-    return full_text[:10_000]
+    st.info(f"Parsed {success_count}/{len(pdf_files)} PDFs.")
+    return full_text[:10_000]  # Truncate
 
-# --- GPT-4 Summariser ---
+# --- GPT-4 summarizer ---
 def summarize_text(text):
     prompt = (
-        "You are a healthcare policy expert. Summarise and analyse the following guidance document:\n\n"
+        "You are a healthcare policy expert. The following documents are from a French government healthcare site. "
+        "If any English summary is included, focus on that. Otherwise, attempt to summarise key content in English:\n\n"
         + text
     )
     response = client.chat.completions.create(
@@ -138,6 +126,10 @@ def summarize_text(text):
     )
     return response.choices[0].message.content
 
+# --- Input handler ---
+def extract_code_or_url(input_text):
+    return input_text.strip().lower()
+
 # --- Streamlit UI ---
 def main():
     st.title("NICE / G-BA / HAS Guidance Summarizer")
@@ -149,10 +141,10 @@ def main():
             st.error("Please enter a guidance code or URL.")
             return
 
-        input_value = user_input.strip()
-        parsed = urlparse(input_value)
+        input_value = extract_code_or_url(user_input)
 
         if input_value.startswith("http"):
+            parsed = urlparse(input_value)
             domain = parsed.netloc.lower()
 
             if "nice.org.uk" in domain:
@@ -160,7 +152,7 @@ def main():
                 st.write(f"Detected UK NICE code: `{code}`")
                 pdf_file = fetch_pdf_from_uk(code)
                 if not pdf_file:
-                    st.error(f"Could not fetch PDF for code '{code}' from NICE UK.")
+                    st.error("Could not fetch PDF from NICE UK.")
                     return
                 text = extract_text_from_pdfs([pdf_file])
 
@@ -168,7 +160,7 @@ def main():
                 st.write("Detected German G-BA site")
                 pdf_files = fetch_pdfs_from_de(input_value)
                 if not pdf_files:
-                    st.error("Could not fetch PDFs from German site.")
+                    st.error("Could not fetch PDFs from G-BA.")
                     return
                 text = extract_text_from_pdfs(pdf_files)
 
@@ -176,17 +168,17 @@ def main():
                 st.write("Detected French HAS site")
                 pdf_files = fetch_pdfs_from_fr(input_value)
                 if not pdf_files:
-                    st.error("Could not fetch English summary PDF from HAS.")
+                    st.error("Could not fetch PDFs from HAS.")
                     return
                 text = extract_text_from_pdfs(pdf_files)
 
             else:
-                st.error("Unsupported domain. Please use NICE, G-BA, or HAS URLs.")
+                st.error("Unsupported domain. Please use NICE, G-BA or HAS links.")
                 return
 
         else:
             # Assume NICE code
-            code = input_value.lower()
+            code = input_value
             st.write(f"Assuming UK NICE code: `{code}`")
             pdf_file = fetch_pdf_from_uk(code)
             if not pdf_file:
@@ -198,7 +190,7 @@ def main():
             st.error("Failed to extract any text from the document.")
             return
 
-        with st.spinner("Summarizing the guidance document..."):
+        with st.spinner("Summarizing with GPT-4..."):
             summary = summarize_text(text)
 
         st.subheader("Summary Result")
