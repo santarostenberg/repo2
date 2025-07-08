@@ -4,53 +4,81 @@ import io
 import PyPDF2
 import openai
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse, urljoin
 
-# Set OpenAI key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# --- Fetch NICE guidance PDF by scraping the page ---
-def fetch_pdf_via_scraping(code):
+# --- NICE UK PDF fetcher ---
+def fetch_pdf_from_nice(code):
     base_url = f"https://www.nice.org.uk/guidance/{code}"
     try:
         resp = requests.get(base_url)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-
-        # Find link with exact PDF guidance
-        link = soup.find("a", string=lambda text: text and "Download guidance (PDF)" in text)
-
+        link = soup.find("a", string=lambda t: t and "Download guidance (PDF)" in t)
         if not link:
             return None
-
         href = link.get("href")
         if href.startswith("/"):
             href = "https://www.nice.org.uk" + href
-
         pdf_resp = requests.get(href)
         pdf_resp.raise_for_status()
-
-        if 'application/pdf' not in pdf_resp.headers.get('Content-Type', ''):
+        if "application/pdf" not in pdf_resp.headers.get("Content-Type", ""):
             return None
-
         return io.BytesIO(pdf_resp.content)
-
     except Exception as e:
-        st.error(f"Error fetching PDF: {str(e)}")
+        st.error(f"Error fetching NICE PDF: {str(e)}")
         return None
 
-# --- Extract text and summarize using OpenAI ---
-def summarize_pdf(pdf_file):
-    reader = PyPDF2.PdfReader(pdf_file)
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text() or ""
-    truncated_text = text[:10_000]
+# --- G-BA Germany PDF fetcher ---
+def fetch_pdfs_from_gba(url):
+    try:
+        url = url.split("#")[0]
+        resp = requests.get(url)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
 
-    prompt = (
-        "You are a healthcare policy expert. Summarise and analyse the following NICE guidance document:\n\n"
-        + truncated_text
-    )
+        pdf_links = []
+        for a in soup.find_all("a", class_="download-helper", href=True):
+            href = a["href"]
+            filename = href.split("/")[-1].lower()
+            if (
+                href.endswith(".pdf")
+                and ("resolution" in filename or "justification" in filename or "rl-xii" in filename)
+            ):
+                full_url = urljoin(url, href)
+                pdf_links.append(full_url)
 
+        st.markdown("### G-BA PDFs found:")
+        for i, link in enumerate(pdf_links, 1):
+            st.markdown(f"{i}. [Download PDF]({link})")
+
+        pdf_files = []
+        for pdf_url in pdf_links:
+            r = requests.get(pdf_url)
+            if r.status_code == 200:
+                pdf_files.append(io.BytesIO(r.content))
+
+        return pdf_files
+    except Exception as e:
+        st.error(f"Error fetching G-BA PDFs: {e}")
+        return []
+
+# --- Extract text from PDF(s) ---
+def extract_text_from_pdfs(pdf_files):
+    full_text = ""
+    for pdf_file in pdf_files:
+        try:
+            reader = PyPDF2.PdfReader(pdf_file)
+            for page in reader.pages:
+                full_text += page.extract_text() or ""
+        except Exception as e:
+            st.warning(f"Error reading PDF: {e}")
+    return full_text[:10_000]
+
+# --- GPT-4 summarizer ---
+def summarize_text(text, source_label="guidance"):
+    prompt = f"You are a healthcare policy expert. Summarise and analyse the following {source_label} document(s):\n\n{text}"
     response = openai.chat.completions.create(
         model="gpt-4",
         messages=[
@@ -61,30 +89,51 @@ def summarize_pdf(pdf_file):
     )
     return response.choices[0].message.content
 
-# --- Extract NICE code from full URL or direct input ---
-def extract_code(input_text):
-    input_text = input_text.strip().lower()
-    if input_text.startswith("http"):
-        return input_text.rstrip("/").split("/")[-1]
-    return input_text
+# --- Streamlit app ---
+st.title("NICE & G-BA Healthcare Guidance Summarizer")
 
-# --- Streamlit UI ---
-st.title("NICE Guidance Summarizer")
-
-user_input = st.text_input("Enter NICE guidance code or full URL")
+user_input = st.text_input("Enter NICE code, or full G-BA/NICE URL")
 
 if st.button("Analyze"):
     if not user_input:
         st.error("Please enter a guidance code or URL.")
     else:
-        code = extract_code(user_input)
-        st.write(f"Processing guidance code: `{code}`")
+        input_val = user_input.strip().lower()
+        text = ""
 
-        pdf_file = fetch_pdf_via_scraping(code)
-        if pdf_file:
-            with st.spinner("Extracting and summarizing..."):
-                summary = summarize_pdf(pdf_file)
-            st.subheader("Summary Result")
-            st.write(summary)
+        if input_val.startswith("http"):
+            domain = urlparse(input_val).netloc
+            if "g-ba.de" in domain:
+                st.write("Detected G-BA (Germany) guidance link.")
+                pdf_files = fetch_pdfs_from_gba(input_val)
+                if not pdf_files:
+                    st.error("No valid PDFs found.")
+                else:
+                    text = extract_text_from_pdfs(pdf_files)
+
+            elif "nice.org.uk" in domain:
+                code = input_val.rstrip("/").split("/")[-1]
+                st.write(f"Detected NICE code: `{code}`")
+                pdf_file = fetch_pdf_from_nice(code)
+                if not pdf_file:
+                    st.error("Could not fetch PDF.")
+                else:
+                    text = extract_text_from_pdfs([pdf_file])
+            else:
+                st.error("Unsupported domain. Only NICE and G-BA are supported.")
         else:
-            st.error(f"Could not fetch PDF for code '{code}'.")
+            code = input_val
+            st.write(f"Assuming NICE code: `{code}`")
+            pdf_file = fetch_pdf_from_nice(code)
+            if not pdf_file:
+                st.error("Could not fetch PDF.")
+            else:
+                text = extract_text_from_pdfs([pdf_file])
+
+        if not text:
+            st.error("Failed to extract any text.")
+        else:
+            with st.spinner("Summarizing..."):
+                summary = summarize_text(text)
+            st.subheader("Summary")
+            st.write(summary)
