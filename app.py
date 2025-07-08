@@ -77,17 +77,29 @@ def fetch_pdfs_from_fr(url):
 
         pdf_links = []
 
-        # Find the Version Anglaise section
+        # First try: structured section
         english_section = soup.find("h3", string=lambda s: s and "Version Anglaise" in s)
         if english_section:
             ul = english_section.find_next("ul")
             if ul:
                 for a in ul.find_all("a", href=True):
                     href = a["href"]
-                    # Only include direct PDF links, not viewer proxies like core.xvox.fr
                     if href.endswith(".pdf") and "core.xvox.fr" not in href:
                         full_url = requests.compat.urljoin(url, href)
                         pdf_links.append(full_url)
+
+        # Fallback: scan all <a> tags for relevant .pdfs
+        if not pdf_links:
+            for a in soup.find_all("a", href=True):
+                text = a.get_text(strip=True).lower()
+                href = a["href"]
+                if (
+                    href.endswith(".pdf") and
+                    "core.xvox.fr" not in href and
+                    ("summary" in href.lower() or "version anglaise" in text or "english" in text)
+                ):
+                    full_url = requests.compat.urljoin(url, href)
+                    pdf_links.append(full_url)
 
         if not pdf_links:
             st.warning("No English summary PDF found on the HAS page.")
@@ -106,6 +118,7 @@ def fetch_pdfs_from_fr(url):
     except Exception as e:
         st.error(f"Error fetching French HAS PDF: {str(e)}")
         return []
+
 
 # --- PDF text extractor ---
 def extract_text_from_pdfs(pdf_files):
