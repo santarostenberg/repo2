@@ -71,6 +71,7 @@ def fetch_pdfs_from_fr(url):
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
+
         for a in soup.find_all("a", href=True):
             href = a["href"]
             if href.endswith(".pdf"):
@@ -80,19 +81,24 @@ def fetch_pdfs_from_fr(url):
         if not pdf_links:
             st.warning("No PDFs found on the HAS page.")
         else:
+            st.markdown("### PDFs found on the HAS page:")
             for i, link in enumerate(pdf_links, 1):
                 st.markdown(f"{i}. [Download PDF]({link})")
 
         pdf_files = []
         for pdf_url in pdf_links:
-            resp = requests.get(pdf_url)
-            if resp.status_code == 200:
-                pdf_files.append(io.BytesIO(resp.content))
+            try:
+                resp = requests.get(pdf_url)
+                if resp.status_code == 200:
+                    pdf_files.append(io.BytesIO(resp.content))
+            except Exception as e:
+                st.warning(f"Failed to download: {pdf_url}\nReason: {e}")
 
         return pdf_files
     except Exception as e:
         st.error(f"Error fetching PDFs from HAS: {str(e)}")
         return []
+
 
 # --- PDF text extractor ---
 def extract_text_from_pdfs(pdf_files):
