@@ -5,11 +5,6 @@ import PyPDF2
 import openai
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-import time
 
 # Initialize OpenAI client
 client = openai.OpenAI()
@@ -65,27 +60,25 @@ def fetch_pdfs_from_de(url):
         st.error(f"Error fetching German PDFs: {str(e)}")
         return []
 
-# --- HAS France PDF fetcher using headless browser ---
+# --- HAS France PDF fetcher (robust) ---
 def fetch_pdfs_from_fr(url):
     try:
-        options = Options()
-        options.add_argument('--headless')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        url = url.split("#")[0]
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:115.0) Gecko/20100101 Firefox/115.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Referer": url,
+            "Connection": "keep-alive"
+        }
 
-        driver.get(url)
-        time.sleep(5)  # Wait for JS content to load
-
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        driver.quit()
+        r = requests.get(url, headers=headers, timeout=20)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if href.endswith(".pdf"):
-                full_url = urljoin(url, href)
-                pdf_links.append(full_url)
+        for link in soup.select("a[href$='.pdf']"):
+            full_url = urljoin(url, link['href'])
+            pdf_links.append(full_url)
 
         if not pdf_links:
             st.warning("No PDFs found on the HAS page.")
@@ -98,11 +91,11 @@ def fetch_pdfs_from_fr(url):
         pdf_files = []
         for pdf_url in pdf_links:
             try:
-                response = requests.get(pdf_url, timeout=20)
-                if response.status_code == 200 and response.headers.get("Content-Type", "").startswith("application/pdf"):
-                    pdf_files.append(io.BytesIO(response.content))
+                res = requests.get(pdf_url, headers=headers, timeout=20)
+                if res.status_code == 200 and res.headers.get("Content-Type", "").startswith("application/pdf"):
+                    pdf_files.append(io.BytesIO(res.content))
                 else:
-                    st.warning(f"Could not fetch: {pdf_url} (status {response.status_code})")
+                    st.warning(f"Could not fetch: {pdf_url} (status {res.status_code})")
             except Exception as e:
                 st.warning(f"Failed to download: {pdf_url}\nReason: {e}")
 
@@ -129,7 +122,7 @@ def extract_text_from_pdfs(pdf_files):
 # --- GPT-4 summarizer ---
 def summarize_text(text):
     prompt = (
-        "You are a healthcare policy expert. The following documents are from a French government healthcare site. "
+        "You are a healthcare policy expert. The following documents are from a government healthcare site. "
         "If any English summary is included, focus on that. Otherwise, attempt to summarise key content in English:\n\n"
         + text
     )
@@ -153,6 +146,9 @@ def main():
 
     user_input = st.text_input("Enter NICE guidance code, or full UK/German/French guidance URL:")
 
+    pdf_files = []
+    extracted_text = ""
+
     if st.button("Analyze"):
         if not user_input:
             st.error("Please enter a guidance code or URL.")
@@ -171,7 +167,7 @@ def main():
                 if not pdf_file:
                     st.error("Could not fetch PDF from NICE UK.")
                     return
-                text = extract_text_from_pdfs([pdf_file])
+                pdf_files = [pdf_file]
 
             elif "g-ba.de" in domain:
                 st.write("Detected German G-BA site")
@@ -179,7 +175,6 @@ def main():
                 if not pdf_files:
                     st.error("Could not fetch PDFs from G-BA.")
                     return
-                text = extract_text_from_pdfs(pdf_files)
 
             elif "has-sante.fr" in domain:
                 st.write("Detected French HAS site")
@@ -187,11 +182,12 @@ def main():
                 if not pdf_files:
                     st.error("Could not fetch PDFs from HAS.")
                     return
-                text = extract_text_from_pdfs(pdf_files)
 
             else:
                 st.error("Unsupported domain. Please use NICE, G-BA or HAS links.")
                 return
+
+            extracted_text = extract_text_from_pdfs(pdf_files)
 
         else:
             code = input_value
@@ -200,15 +196,19 @@ def main():
             if not pdf_file:
                 st.error(f"Could not fetch PDF for code '{code}' from NICE UK.")
                 return
-            text = extract_text_from_pdfs([pdf_file])
+            extracted_text = extract_text_from_pdfs([pdf_file])
 
-        if not text.strip():
-            st.error("Failed to extract any text from the document.")
-            return
+    # Manual fallback for PDF upload
+    st.markdown("---")
+    st.subheader("Or upload a PDF manually")
+    uploaded_file = st.file_uploader("Upload a PDF file here")
+    if uploaded_file:
+        pdf_files = [uploaded_file]
+        extracted_text = extract_text_from_pdfs(pdf_files)
 
+    if extracted_text:
         with st.spinner("Summarizing with GPT-4..."):
-            summary = summarize_text(text)
-
+            summary = summarize_text(extracted_text)
         st.subheader("Summary Result")
         st.write(summary)
 
