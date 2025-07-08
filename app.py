@@ -65,71 +65,49 @@ def fetch_pdfs_from_de(url):
 # --- HAS France PDF fetcher ---
 def fetch_pdfs_from_fr(url):
     try:
+        from urllib.parse import urljoin
+        import time
+
         url = url.split("#")[0]
-        r = requests.get(url)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+
+        r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
-
         for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if href.endswith(".pdf"):
-                full_url = requests.compat.urljoin(url, href)
+            if a["href"].endswith(".pdf"):
+                full_url = urljoin(url, a["href"])
                 pdf_links.append(full_url)
 
         if not pdf_links:
             st.warning("No PDFs found on the HAS page.")
-        else:
-            st.markdown("### PDFs found on the HAS page:")
-            for i, link in enumerate(pdf_links, 1):
-                st.markdown(f"{i}. [Download PDF]({link})")
+            return []
+
+        st.markdown("### PDFs found on the HAS page:")
+        for i, link in enumerate(pdf_links, 1):
+            st.markdown(f"{i}. [Download PDF]({link})")
 
         pdf_files = []
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/115.0 Safari/537.36"
-            )
-        }
-
         for pdf_url in pdf_links:
-            success = False
-
-            # 1. Try direct download with headers
             try:
-                resp = requests.get(pdf_url, headers=headers, timeout=10)
+                resp = requests.get(pdf_url, headers=headers, timeout=15)
                 if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/pdf"):
                     pdf_files.append(io.BytesIO(resp.content))
-                    success = True
-                    continue
+                else:
+                    st.warning(f"Failed to fetch: {pdf_url} (status {resp.status_code})")
             except Exception as e:
-                st.warning(f"Direct download failed: {pdf_url}\nReason: {e}")
-
-            # 2. Fallback to core.xvox.fr proxy
-            try:
-                if "core.xvox.fr" in pdf_url:
-                    raw_url = pdf_url.split("has-sante.fr/", 1)[-1]
-                    pdf_url = requests.utils.unquote(raw_url)
-
-                encoded_url = requests.utils.quote(pdf_url, safe="")
-                proxy_url = f"https://core.xvox.fr/readPDF/has-sante.fr/{encoded_url}"
-
-                resp = requests.get(proxy_url, timeout=10)
-                if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/pdf"):
-                    pdf_files.append(io.BytesIO(resp.content))
-                    success = True
-            except Exception as e:
-                st.warning(f"Failed to download via proxy: {proxy_url}\nReason: {e}")
-
-            if not success:
-                st.error(f"Could not download: {pdf_url}")
+                st.warning(f"Download failed: {pdf_url}\nReason: {e}")
+                time.sleep(1)  # be nice to HAS servers
 
         return pdf_files
     except Exception as e:
-        st.error(f"Error fetching PDFs from HAS: {str(e)}")
+        st.error(f"General error fetching from HAS: {str(e)}")
         return []
+
 
 
 # --- PDF text extractor ---
