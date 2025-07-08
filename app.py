@@ -71,6 +71,7 @@ def fetch_pdfs_from_fr(url):
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
+
         for a in soup.find_all("a", href=True):
             href = a["href"]
             if href.endswith(".pdf"):
@@ -85,20 +86,28 @@ def fetch_pdfs_from_fr(url):
                 st.markdown(f"{i}. [Download PDF]({link})")
 
         pdf_files = []
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/115.0 Safari/537.36"
+            )
+        }
+
         for pdf_url in pdf_links:
             success = False
 
-            # 1. Try direct download
+            # 1. Try direct download with headers
             try:
-                resp = requests.get(pdf_url, timeout=10)
+                resp = requests.get(pdf_url, headers=headers, timeout=10)
                 if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/pdf"):
                     pdf_files.append(io.BytesIO(resp.content))
                     success = True
                     continue
-            except:
-                pass  # Fallback to proxy if direct fails
+            except Exception as e:
+                st.warning(f"Direct download failed: {pdf_url}\nReason: {e}")
 
-            # 2. Fallback to core.xvox.fr
+            # 2. Fallback to core.xvox.fr proxy
             try:
                 if "core.xvox.fr" in pdf_url:
                     raw_url = pdf_url.split("has-sante.fr/", 1)[-1]
@@ -121,6 +130,7 @@ def fetch_pdfs_from_fr(url):
     except Exception as e:
         st.error(f"Error fetching PDFs from HAS: {str(e)}")
         return []
+
 
 # --- PDF text extractor ---
 def extract_text_from_pdfs(pdf_files):
