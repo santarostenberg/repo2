@@ -82,6 +82,46 @@ def fetch_pdfs_from_has(url):
         soup = BeautifulSoup(resp.text, "html.parser")
 
         all_links = soup.find_all("a", href=True)
+        for a in all_links:
+            href = a["href"]
+
+            # Ignore core.xvox.fr or external proxy links
+            if "core.xvox.fr" in href or "readPDF" in href:
+                skipped_links.append(href)
+                continue
+
+            # Focus only on actual PDF files hosted on has-sante.fr
+            if href.endswith(".pdf") and "upload" in href:
+                full_url = href if href.startswith("http") else urljoin("https://www.has-sante.fr", href)
+
+                try:
+                    r = requests.get(full_url, headers=headers, timeout=10)
+                    content_type = r.headers.get("Content-Type", "")
+
+                    if r.status_code == 200 and "application/pdf" in content_type:
+                        valid_pdfs.append(io.BytesIO(r.content))
+                    else:
+                        skipped_links.append(full_url)
+                except Exception as download_error:
+                    skipped_links.append(full_url)
+
+        if valid_pdfs:
+            st.markdown("### ✅ Valid HAS PDFs:")
+            for i, link in enumerate(valid_pdfs, 1):
+                st.markdown(f"{i}. PDF {i} successfully downloaded.")
+        else:
+            st.warning("No valid PDFs found on this HAS page.")
+
+        if skipped_links:
+            st.markdown("### ⚠️ Skipped or broken PDF links:")
+            for link in skipped_links:
+                st.markdown(f"- {link}")
+
+        return valid_pdfs
+
+    except Exception as e:
+        st.error(f"❌ Error fetching HAS page: {e}")
+        return []
 
 
 # --- Extract text from PDF(s) ---
