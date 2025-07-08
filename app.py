@@ -5,6 +5,11 @@ import PyPDF2
 import openai
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+import time
 
 # Initialize OpenAI client
 client = openai.OpenAI()
@@ -60,17 +65,20 @@ def fetch_pdfs_from_de(url):
         st.error(f"Error fetching German PDFs: {str(e)}")
         return []
 
-# --- HAS France PDF fetcher (improved direct-only method) ---
+# --- HAS France PDF fetcher using headless browser ---
 def fetch_pdfs_from_fr(url):
     try:
-        url = url.split("#")[0]
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        }
+        options = Options()
+        options.add_argument('--headless')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
-        r = requests.get(url, headers=headers, timeout=15)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
+        driver.get(url)
+        time.sleep(5)  # Wait for JS content to load
+
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        driver.quit()
 
         pdf_links = []
         for a in soup.find_all("a", href=True):
@@ -90,7 +98,7 @@ def fetch_pdfs_from_fr(url):
         pdf_files = []
         for pdf_url in pdf_links:
             try:
-                response = requests.get(pdf_url, headers=headers, timeout=20)
+                response = requests.get(pdf_url, timeout=20)
                 if response.status_code == 200 and response.headers.get("Content-Type", "").startswith("application/pdf"):
                     pdf_files.append(io.BytesIO(response.content))
                 else:
@@ -186,7 +194,6 @@ def main():
                 return
 
         else:
-            # Assume NICE code
             code = input_value
             st.write(f"Assuming UK NICE code: `{code}`")
             pdf_file = fetch_pdf_from_uk(code)
