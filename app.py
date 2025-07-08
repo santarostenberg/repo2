@@ -111,7 +111,6 @@ def fetch_pdfs_from_fr(url):
 
 
 
-
 # --- PDF text extractor ---
 def extract_text_from_pdfs(pdf_files):
     full_text = ""
