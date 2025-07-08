@@ -87,17 +87,36 @@ def fetch_pdfs_from_fr(url):
 
         pdf_files = []
         for pdf_url in pdf_links:
+            success = False
+
+            # 1. Try direct download
             try:
-                resp = requests.get(pdf_url)
-                if resp.status_code == 200:
+                resp = requests.get(pdf_url, timeout=10)
+                if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/pdf"):
                     pdf_files.append(io.BytesIO(resp.content))
+                    success = True
+                    continue
+            except Exception as e:
+                pass  # fallback to proxy
+
+            # 2. Fallback to core.xvox.fr
+            try:
+                proxy_url = f"https://core.xvox.fr/readPDF/has-sante.fr/{pdf_url}"
+                resp = requests.get(proxy_url, timeout=10)
+                if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/pdf"):
+                    pdf_files.append(io.BytesIO(resp.content))
+                    success = True
             except Exception as e:
                 st.warning(f"Failed to download: {pdf_url}\nReason: {e}")
+
+            if not success:
+                st.error(f"Could not download: {pdf_url}")
 
         return pdf_files
     except Exception as e:
         st.error(f"Error fetching PDFs from HAS: {str(e)}")
         return []
+
 
 
 # --- PDF text extractor ---
