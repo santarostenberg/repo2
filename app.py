@@ -66,6 +66,44 @@ def fetch_pdfs_from_de(url):
     except Exception as e:
         st.error(f"Error fetching German PDFs: {str(e)}")
         return []
+# --- HAS FR PDF fetcher ---
+def fetch_pdfs_from_fr(url):
+    try:
+        url = url.split("#")[0]
+        r = requests.get(url)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        pdf_links = []
+
+        # Find the Version Anglaise section
+        english_section = soup.find("h3", string=lambda s: s and "Version Anglaise" in s)
+        if english_section:
+            ul = english_section.find_next("ul")
+            if ul:
+                for a in ul.find_all("a", href=True):
+                    href = a["href"]
+                    if href.endswith(".pdf"):
+                        full_url = requests.compat.urljoin(url, href)
+                        pdf_links.append(full_url)
+
+        if not pdf_links:
+            st.warning("No English summary PDF found on the HAS page.")
+        else:
+            st.markdown("### French HAS PDF found:")
+            for i, link in enumerate(pdf_links, 1):
+                st.markdown(f"{i}. [Download PDF]({link})")
+
+        pdf_files = []
+        for pdf_url in pdf_links:
+            resp = requests.get(pdf_url)
+            if resp.status_code == 200:
+                pdf_files.append(io.BytesIO(resp.content))
+
+        return pdf_files
+    except Exception as e:
+        st.error(f"Error fetching French HAS PDF: {str(e)}")
+        return []
 
 # --- PDF text extractor ---
 def extract_text_from_pdfs(pdf_files):
@@ -106,7 +144,7 @@ def extract_code_or_url(input_text):
 
 # --- Streamlit UI ---
 def main():
-    st.title("NICE/G-BA Guidance Summarizer")
+    st.title("NICE / G-BA / HAS Guidance Summarizer")
 
     user_input = st.text_input("Enter NICE guidance code, or full UK/German guidance URL:")
 
@@ -137,6 +175,15 @@ def main():
                     st.error("Could not fetch PDFs from German site.")
                     return
                 text = extract_text_from_pdfs(pdf_files)
+
+            elif "has-sante.fr" in domain:
+                st.write("Detected French HAS site")
+                pdf_files = fetch_pdfs_from_fr(input_value)
+                if not pdf_files:
+                    st.error("Could not fetch English summary PDF from HAS.")
+                    return
+                text = extract_text_from_pdfs(pdf_files)
+
 
             else:
                 st.error("Unsupported domain. Please use NICE or G-BA URLs.")
