@@ -62,7 +62,7 @@ def fetch_pdfs_from_de(url):
         st.error(f"Error fetching German PDFs: {str(e)}")
         return []
 
-# --- HAS France PDF fetcher (grabs all) ---
+# --- HAS France PDF fetcher ---
 def fetch_pdfs_from_fr(url):
     try:
         url = url.split("#")[0]
@@ -71,7 +71,6 @@ def fetch_pdfs_from_fr(url):
         soup = BeautifulSoup(r.text, "html.parser")
 
         pdf_links = []
-
         for a in soup.find_all("a", href=True):
             href = a["href"]
             if href.endswith(".pdf"):
@@ -101,8 +100,13 @@ def fetch_pdfs_from_fr(url):
 
             # 2. Fallback to core.xvox.fr
             try:
+                if "core.xvox.fr" in pdf_url:
+                    raw_url = pdf_url.split("has-sante.fr/", 1)[-1]
+                    pdf_url = requests.utils.unquote(raw_url)
+
                 encoded_url = requests.utils.quote(pdf_url, safe="")
                 proxy_url = f"https://core.xvox.fr/readPDF/has-sante.fr/{encoded_url}"
+
                 resp = requests.get(proxy_url, timeout=10)
                 if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/pdf"):
                     pdf_files.append(io.BytesIO(resp.content))
@@ -117,9 +121,6 @@ def fetch_pdfs_from_fr(url):
     except Exception as e:
         st.error(f"Error fetching PDFs from HAS: {str(e)}")
         return []
-
-
-
 
 # --- PDF text extractor ---
 def extract_text_from_pdfs(pdf_files):
@@ -204,7 +205,6 @@ def main():
                 return
 
         else:
-            # Assume NICE code
             code = input_value
             st.write(f"Assuming UK NICE code: `{code}`")
             pdf_file = fetch_pdf_from_uk(code)
